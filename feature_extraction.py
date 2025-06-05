@@ -6,9 +6,10 @@ from bs4 import BeautifulSoup
 import os
 from dotenv import load_dotenv
 from datetime import datetime, timezone
-from selenium import webdriver
-from selenium.webdriver.common.by import By
 import csv
+
+load_dotenv()  # Fixed: Added parentheses
+SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY")
 
 def length_url(url):
     return len(url)
@@ -34,35 +35,37 @@ def phish_count(url):
 def num_hyper(url):
     try:
         base_domain = urlparse(url).netloc
-        # make sure you have chrome driver in the path else this will not work      
-        driver = webdriver.Chrome()
-        driver.get(url)
-
-        a_elements = driver.find_elements(By.TAG_NAME, "a")
+        
+        # Use requests instead of Selenium
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        a_elements = soup.find_all('a', href=True)
+        
         all_links = []
         internal_links = []
+        
         for link in a_elements:
-            href = link.get_attribute("href")
-            if (link.get_attribute("href")):
-                all_links.append(href)
-                full_url = urljoin(url, href)
-                link_domain = urlparse(full_url).netloc
-
-                # 5. Check if it's an internal link (same domain)
-                if link_domain == base_domain:
-                    internal_links.append(full_url)
-
-        driver.quit()
+            href = link['href']
+            all_links.append(href)
+            full_url = urljoin(url, href)
+            link_domain = urlparse(full_url).netloc
+            
+            if link_domain == base_domain:
+                internal_links.append(full_url)
+        
         len_int = len(internal_links)
         return len_int, len(all_links) - len_int, len(all_links)
     
     except requests.RequestException as e:
-        print(f"Error fetching URL given {url}:{e}, try another url")
-        return 0,0,0
-    
+        print(f"Error fetching URL {url}: {e}")
+        return 0, 0, 0
 
 def get_domain_age(domain):
-    load_dotenv()
     api_key = os.getenv("WHOIS_API_KEY")
     url = "https://www.whoisxmlapi.com/whoisserver/WhoisService"
 
@@ -75,23 +78,22 @@ def get_domain_age(domain):
     try:
         response = requests.get(url, params=params, timeout=60)
         data = response.json()
-        #print(data["estimatedDomainAge"])
+        
         if "ErrorMessage" in data:
             print("WHOISAPI error ", data["ErrorMessage"])
+            return None
 
         # Parse creation and expiration dates
         dom_age = data['WhoisRecord']['estimatedDomainAge']
-
         return dom_age if dom_age > 0 else -1
 
     except Exception as e:
         print(f"WHOIS API error: {e}")
         return None
 
-
 def clean_url(domain):
     parsed = urlparse(domain)
-
+    
     # Rebuild the URL without query and fragment
     clean = urlunparse((
         parsed.scheme,
@@ -102,12 +104,8 @@ def clean_url(domain):
     return clean
 
 def get_google_index(domain):
-    load_dotenv()
     api_key = os.getenv("SERPAPI_API_KEY")
     url = "https://serpapi.com/search"
-
-    # cleaned_url = str(clean_url(domain))
-    # print("cleaned Link ", cleaned_url)
 
     params = {
         "engine": "google",
@@ -131,20 +129,10 @@ def get_google_index(domain):
         print(f"Error: {e}")
         return 0
 
-def run(url):
-    print(phish_count(url))
-
-## For Testing
-if __name__ == "__main__":
-    test_url = "http://www.crestonwood.com/router.php"
-    test2 = "https://leetcode.com/urgent/loginbitcoin/invoice"
-    run(test2)
-
 def extract_features(url):
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "http://" + url
 
-    # url = clean_url(url)
     ## Length of url
     lenUrl = length_url(url)
 
@@ -157,7 +145,7 @@ def extract_features(url):
     ## Phish hints
     phish_hints = phish_count(url)
 
-    ## number of hyperlinks (Need to scrape)
+    ## number of hyperlinks
     num_hyperlinks = num_hyper(url)
     total_links = num_hyperlinks[2]
 
@@ -173,8 +161,6 @@ def extract_features(url):
     ## google idx (SerpAPI)
     is_indexed = get_google_index(url)
 
-    ##page rank
-
     features = [
         lenUrl,
         countW,
@@ -188,9 +174,6 @@ def extract_features(url):
 
     features_np = np.array([features])
     return features_np
-
-
-    
 
 
 
